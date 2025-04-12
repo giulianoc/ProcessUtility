@@ -27,6 +27,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <format>
+#include <fstream>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -226,6 +227,135 @@ int ProcessUtility::execute(string command)
 	return returnedStatus;
 }
 
+void ProcessUtility::killProcess(pid_t pid)
+{
+	if (pid <= 0)
+	{
+		string errorMessage = std::format("pid is wrong. pid: {}", pid);
+
+		throw runtime_error(errorMessage);
+	}
+
+	if (kill(pid, SIGKILL) == -1)
+	{
+		string errorMessage = std::format("kill failed. errno: {}", errno);
+
+		throw runtime_error(errorMessage);
+	}
+}
+
+void ProcessUtility::termProcess(pid_t pid)
+{
+	if (pid <= 0)
+	{
+		string errorMessage = std::format("pid is wrong. pid: {}", pid);
+
+		throw runtime_error(errorMessage);
+	}
+
+	if (kill(pid, SIGTERM) == -1)
+	{
+		string errorMessage = std::format("kill failed. errno: {}", errno);
+
+		throw runtime_error(errorMessage);
+	}
+}
+
+void ProcessUtility::quitProcess(pid_t pid)
+{
+	if (pid <= 0)
+	{
+		string errorMessage = std::format("pid is wrong. pid: {}", pid);
+
+		throw runtime_error(errorMessage);
+	}
+
+	if (kill(pid, SIGQUIT) == -1)
+	{
+		string errorMessage = std::format("quit failed. errno: {}", errno);
+
+		throw runtime_error(errorMessage);
+	}
+}
+
+void ProcessUtility::launchUnixDaemon(string pidFilePathName)
+{
+	/* Our process ID and Session ID */
+	pid_t pid, sid;
+
+	/* Fork off the parent process */
+	pid = fork();
+	if (pid < 0)
+	{
+		exit(EXIT_FAILURE);
+	}
+
+	/* If we got a good PID, then
+		we can exit the parent process. */
+	if (pid > 0)
+	{
+		exit(EXIT_SUCCESS);
+	}
+
+	/*
+		In order to write to any files (including logs) created
+		by the daemon, the file mode mask (umask) must be changed
+		to ensure that they can be written to or read from properly.
+		umask default value: 0x022
+	*/
+	umask(0x002);
+
+	/*
+		From here, the child process must get a unique SID from the kernel
+		in order to operate. Otherwise, the child process becomes
+		an orphan in the system.
+	*/
+	sid = setsid();
+	if (sid < 0)
+	{
+		/* Log the failure */
+
+		exit(EXIT_FAILURE);
+	}
+
+	/*
+		The current working directory should be changed to some place
+		that is guaranteed to always be there.
+	*/
+	if ((chdir("/")) < 0)
+	{
+		/* Log the failure */
+
+		exit(EXIT_FAILURE);
+	}
+
+	/* Close out the standard file descriptors */
+	/*
+		Since a daemon cannot use the terminal, it is better to close
+		the standard file descriptors (STDIN, STDOUT, STDERR) that
+		are redundant and potential security hazard.
+	*/
+	close(STDIN_FILENO);
+	close(STDOUT_FILENO);
+	// close (STDERR_FILENO);
+
+	{
+		long processIdentifier = ProcessUtility::getCurrentProcessIdentifier();
+
+		ofstream of(pidFilePathName.c_str(), ofstream::trunc);
+		of << processIdentifier;
+	}
+}
+
+long ProcessUtility::getCurrentProcessIdentifier()
+{
+#ifdef WIN32
+	return _getpid();
+#else
+	return getpid();
+#endif
+}
+
 /*
 Error ProcessUtility::getCurrentProcessIdentifier(long *plProcessIdentifier)
 
@@ -245,66 +375,6 @@ Error ProcessUtility::getCurrentProcessIdentifier(long *plProcessIdentifier)
 #endif
 
 	return errNoError;
-}
-
-long ProcessUtility::getCurrentProcessIdentifier()
-{
-#ifdef WIN32
-	return _getpid();
-#else
-	return getpid();
-#endif
-}
-
-void ProcessUtility::killProcess(pid_t pid)
-{
-	if (pid <= 0)
-	{
-		string errorMessage = string("pid is wrong. pid: ") + to_string(pid);
-
-		throw runtime_error(errorMessage);
-	}
-
-	if (kill(pid, SIGKILL) == -1)
-	{
-		string errorMessage = string("kill failed. errno: ") + to_string(errno);
-
-		throw runtime_error(errorMessage);
-	}
-}
-
-void ProcessUtility::termProcess(pid_t pid)
-{
-	if (pid <= 0)
-	{
-		string errorMessage = string("pid is wrong. pid: ") + to_string(pid);
-
-		throw runtime_error(errorMessage);
-	}
-
-	if (kill(pid, SIGTERM) == -1)
-	{
-		string errorMessage = string("kill failed. errno: ") + to_string(errno);
-
-		throw runtime_error(errorMessage);
-	}
-}
-
-void ProcessUtility::quitProcess(pid_t pid)
-{
-	if (pid <= 0)
-	{
-		string errorMessage = string("pid is wrong. pid: ") + to_string(pid);
-
-		throw runtime_error(errorMessage);
-	}
-
-	if (kill(pid, SIGQUIT) == -1)
-	{
-		string errorMessage = string("quit failed. errno: ") + to_string(errno);
-
-		throw runtime_error(errorMessage);
-	}
 }
 
 #ifdef WIN32

@@ -56,9 +56,15 @@ typedef class ProcessUtility
 
 	static int execute(string command);
 
+	static void killProcess(pid_t pid);
+	static void termProcess(pid_t pid);
+	static void quitProcess(pid_t pid);
+
+	void launchUnixDaemon(string pidFilePathName);
+	static long getCurrentProcessIdentifier();
+
 	/*
 	static Error getCurrentProcessIdentifier(long *plProcessIdentifier);
-	static long getCurrentProcessIdentifier();
 
 	// Executes a command specified in pCommand and
 	// returns after the command has been completed.
@@ -68,10 +74,6 @@ typedef class ProcessUtility
 	// argument to a call to exit() or _exit() or as the argument for a
 	// return statement in the main program.
 	static Error execute(const char *pCommand, int *piReturnedStatus);
-
-	static void killProcess(pid_t pid);
-	static void termProcess(pid_t pid);
-	static void quitProcess(pid_t pid);
 
 	// Set the user and group ID of the current process.
 #ifdef WIN32
