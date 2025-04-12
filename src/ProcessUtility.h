@@ -60,7 +60,7 @@ typedef class ProcessUtility
 	static void termProcess(pid_t pid);
 	static void quitProcess(pid_t pid);
 
-	void launchUnixDaemon(string pidFilePathName);
+	static void launchUnixDaemon(string pidFilePathName);
 	static long getCurrentProcessIdentifier();
 
 	/*
