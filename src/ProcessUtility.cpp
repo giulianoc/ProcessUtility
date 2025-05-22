@@ -22,7 +22,6 @@
 */
 
 #include "ProcessUtility.h"
-#include "spdlog/spdlog.h"
 #include <assert.h>
 #include <cstdlib>
 #include <errno.h>
@@ -51,30 +50,6 @@
 #include <signal.h>
 // #endif
 */
-
-ProcessUtility::ProcessUtility(void) {}
-
-ProcessUtility::~ProcessUtility(void) {}
-
-ProcessUtility::ProcessUtility(const ProcessUtility &)
-
-{
-
-	assert(1 == 0);
-
-	// to do
-}
-
-ProcessUtility &ProcessUtility::operator=(const ProcessUtility &)
-
-{
-
-	assert(1 == 0);
-
-	// to do
-
-	return *this;
-}
 
 void ProcessUtility::forkAndExec(
 	string programPath,
@@ -200,98 +175,6 @@ void ProcessUtility::forkAndExec(
 		string errorMessage = string("An error occurred in execv. errno: ") + to_string(errno);
 
 		throw runtime_error(errorMessage);
-	}
-}
-
-template <typename Func> int ProcessUtility::forkAndExec(Func func, int timeoutSeconds, string referenceToLog)
-{
-	// Duplicate this process.
-	pid_t childPid = fork();
-	if (childPid == -1)
-	{
-		string errorMessage = std::format("Fork failed. errno: {}", errno);
-
-		throw runtime_error(errorMessage);
-	}
-
-	if (childPid != 0)
-	{
-		// parent process
-		// Status information about the child reported by wait is more than just the exit status of the child, it also includes
-		// - normal/abnormal termination
-		//		WIFEXITED(status): child exited normally
-		//		WEXITSTATUS(status): return code when child exits
-		// - termination cause
-		//		WIFSIGNALED(status): child exited because a signal was not caught
-		//		WTERMSIG(status): gives the number of the terminating signal
-		// - exit status
-		//		WIFSTOPPED(status): child is stopped
-		//		WSTOPSIG(status): gives the number of the stop signal
-		// if we want to prints information about a signal
-		//	void psignal(unsigned sig, const char *s);
-
-		// Processo padre: aspetta con timeout
-		int waited = 0;
-		int exitStatus = 0;
-		while (waited < timeoutSeconds)
-		{
-			pid_t result = waitpid(childPid, &exitStatus, WNOHANG);
-			if (result == 0)
-			{
-				if (waited % 60 == 0)
-					SPDLOG_INFO(
-						"Still waiting the child process"
-						"{}",
-						referenceToLog
-					);
-				sleep(1);
-				waited++;
-			}
-			else
-				break;
-		}
-
-		if (waited >= timeoutSeconds)
-		{
-			kill(childPid, SIGKILL);
-			waitpid(childPid, &exitStatus, 0); // cleanup zombie
-
-			exitStatus = -3; // timeout
-
-			SPDLOG_ERROR(
-				"Child process timeout, killed"
-				"{}"
-				", childPid: {}"
-				", exitStatus: {}",
-				referenceToLog, childPid, exitStatus
-			);
-
-			return exitStatus;
-		}
-
-		exitStatus = WIFEXITED(exitStatus) ? WEXITSTATUS(exitStatus) : -4;
-
-		SPDLOG_INFO(
-			"Child process terminated"
-			"{}"
-			", exitStatus: {}",
-			referenceToLog, exitStatus
-		);
-
-		return exitStatus;
-	}
-	else
-	{
-		// Processo figlio: esegue il comando bloccante
-		try
-		{
-			return func();
-		}
-		catch (const std::exception &e)
-		{
-			// std::cerr << "Error: " << e.what() << std::endl;
-			return -1;
-		}
 	}
 }
 
