@@ -64,7 +64,14 @@ template <typename Func> int ProcessUtility::forkAndExec(Func func, int timeoutS
 	pid_t childPid = fork();
 	if (childPid == -1)
 	{
-		string errorMessage = std::format("Fork failed. errno: {}", errno);
+		string errorMessage = std::format(
+			"forkAndExec. Fork failed"
+			"{}"
+			", timeoutSeconds: {}"
+			", errno: {}",
+			referenceToLog, timeoutSeconds, errno
+		);
+		SPDLOG_ERROR(errorMessage);
 
 		throw runtime_error(errorMessage);
 	}
@@ -94,12 +101,13 @@ template <typename Func> int ProcessUtility::forkAndExec(Func func, int timeoutS
 			if (result == 0)
 			{
 				if (waited % 60 == 0)
-					SPDLOG_INFO(
-						"Still waiting the child process"
-						"{}",
-						referenceToLog
+					SPDLOG_DEBUG(
+						"forkAndExec. Still waiting the child process"
+						"{}"
+						", timeoutSeconds: {}",
+						referenceToLog, timeoutSeconds
 					);
-				sleep(1);
+				this_thread::sleep_for(chrono::seconds(1));
 				waited++;
 			}
 			else
@@ -114,11 +122,12 @@ template <typename Func> int ProcessUtility::forkAndExec(Func func, int timeoutS
 			exitStatus = -3; // timeout
 
 			SPDLOG_ERROR(
-				"Child process timeout, killed"
+				"forkAndExec. Child process timeout, killed"
 				"{}"
+				", timeoutSeconds: {}"
 				", childPid: {}"
 				", exitStatus: {}",
-				referenceToLog, childPid, exitStatus
+				referenceToLog, timeoutSeconds, childPid, exitStatus
 			);
 
 			return exitStatus;
@@ -126,11 +135,12 @@ template <typename Func> int ProcessUtility::forkAndExec(Func func, int timeoutS
 
 		exitStatus = WIFEXITED(exitStatus) ? WEXITSTATUS(exitStatus) : -4;
 
-		SPDLOG_INFO(
-			"Child process terminated"
+		SPDLOG_DEBUG(
+			"forkAndExec. Child process terminated"
 			"{}"
+			", timeoutSeconds: {}"
 			", exitStatus: {}",
-			referenceToLog, exitStatus
+			referenceToLog, timeoutSeconds, exitStatus
 		);
 
 		return exitStatus;
