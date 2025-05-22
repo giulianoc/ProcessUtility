@@ -28,6 +28,8 @@ SET (HEADERS
 	ProcessUtility.h
 )
 
+include_directories("${SPDLOG_INCLUDE_DIR}")
+
 add_library (ProcessUtility SHARED ${SOURCES} ${HEADERS})
 
 install (TARGETS ProcessUtility DESTINATION lib)

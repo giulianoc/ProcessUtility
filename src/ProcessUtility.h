@@ -54,6 +54,8 @@ typedef class ProcessUtility
 		vector<string> &argList, string redirectionPathName, bool redirectionStdOutput, bool redirectionStdError, pid_t *pPid, int *piReturnedStatus
 	);
 
+	template <typename Func> static int forkAndExec(Func func, int timeoutSeconds = 10, string referenceToLog = "");
+
 	static int execute(string command);
 
 	static void killProcess(pid_t pid);
