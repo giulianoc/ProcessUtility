@@ -22,12 +22,12 @@
 */
 
 #pragma once
-// #ifndef ProcessUtility_h
-// #define ProcessUtility_h
 
 #include "spdlog/spdlog.h"
 #include <format>
+#include <signal.h>
 #include <string>
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
