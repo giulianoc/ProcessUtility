@@ -33,31 +33,14 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
-/*
-#include <stdexcept>
-#include <sys/types.h>
-#ifdef WIN32
-#include <Winsock2.h>
-#include <process.h>
-#else
-#include <sys/utsname.h>
-#include <sys/vfs.h>
-#endif
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-// #ifdef __QTCOMPILER__
-#include <signal.h>
-// #endif
-*/
 
 void ProcessUtility::forkAndExec(
 	string programPath,
 	// first string is the program name, than we have the params
-	vector<string> &argList, string redirectionPathName, bool redirectionStdOutput, bool redirectionStdError, pid_t *pPid, int *piReturnedStatus
+	vector<string> &argList, string redirectionPathName, bool redirectionStdOutput, bool redirectionStdError, ProcessId &processId,
+	int *piReturnedStatus
 )
 {
-
 	// Duplicate this process.
 	pid_t childPid = fork();
 	if (childPid == -1)
@@ -84,7 +67,7 @@ void ProcessUtility::forkAndExec(
 		// if we want to prints information about a signal
 		//	void psignal(unsigned sig, const char *s);
 
-		*pPid = childPid;
+		processId.pid = childPid;
 
 		bool childTerminated = false;
 		while (!childTerminated)
@@ -179,7 +162,6 @@ void ProcessUtility::forkAndExec(
 }
 
 int ProcessUtility::execute(string command)
-
 {
 	int returnedStatus;
 	int iLocalStatus;
@@ -203,16 +185,16 @@ int ProcessUtility::execute(string command)
 	return returnedStatus;
 }
 
-void ProcessUtility::killProcess(pid_t pid)
+void ProcessUtility::killProcess(ProcessId processId)
 {
-	if (pid <= 0)
+	if (processId.pid <= 0)
 	{
-		string errorMessage = std::format("pid is wrong. pid: {}", pid);
+		string errorMessage = std::format("pid is wrong. pid: {}", processId.pid);
 
 		throw runtime_error(errorMessage);
 	}
 
-	if (kill(pid, SIGKILL) == -1)
+	if (kill(processId.pid, SIGKILL) == -1)
 	{
 		string errorMessage = std::format("kill failed. errno: {}", errno);
 
@@ -220,16 +202,16 @@ void ProcessUtility::killProcess(pid_t pid)
 	}
 }
 
-void ProcessUtility::termProcess(pid_t pid)
+void ProcessUtility::termProcess(ProcessId processId)
 {
-	if (pid <= 0)
+	if (processId.pid <= 0)
 	{
-		string errorMessage = std::format("pid is wrong. pid: {}", pid);
+		string errorMessage = std::format("pid is wrong. pid: {}", processId.pid);
 
 		throw runtime_error(errorMessage);
 	}
 
-	if (kill(pid, SIGTERM) == -1)
+	if (kill(processId.pid, SIGTERM) == -1)
 	{
 		string errorMessage = std::format("kill failed. errno: {}", errno);
 
@@ -237,16 +219,16 @@ void ProcessUtility::termProcess(pid_t pid)
 	}
 }
 
-void ProcessUtility::quitProcess(pid_t pid)
+void ProcessUtility::quitProcess(ProcessId processId)
 {
-	if (pid <= 0)
+	if (processId.pid <= 0)
 	{
-		string errorMessage = std::format("pid is wrong. pid: {}", pid);
+		string errorMessage = std::format("pid is wrong. pid: {}", processId.pid);
 
 		throw runtime_error(errorMessage);
 	}
 
-	if (kill(pid, SIGQUIT) == -1)
+	if (kill(processId.pid, SIGQUIT) == -1)
 	{
 		string errorMessage = std::format("quit failed. errno: {}", errno);
 

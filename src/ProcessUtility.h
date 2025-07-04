@@ -25,32 +25,46 @@
 
 #include "spdlog/spdlog.h"
 #include <format>
-#include <signal.h>
 #include <string>
+#include <vector>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <vector>
+#endif
 
 using namespace std;
 
 class ProcessUtility
 {
 
+	struct ProcessId
+	{
+#ifdef _WIN32
+		HANDLE processHandle = NULL;
+#else
+		pid_t pid = -1;
+#endif
+	};
+
   public:
 	static void forkAndExec(
 		string programPath,
 		// first string is the program name, than we have the params
-		vector<string> &argList, string redirectionPathName, bool redirectionStdOutput, bool redirectionStdError, pid_t *pPid, int *piReturnedStatus
+		vector<string> &argList, string redirectionPathName, bool redirectionStdOutput, bool redirectionStdError, ProcessId &processId,
+		int *piReturnedStatus
 	);
 
 	template <typename Func> static int forkAndExec(Func func, int timeoutSeconds = 10, string referenceToLog = "");
 
 	static int execute(string command);
 
-	static void killProcess(pid_t pid);
-	static void termProcess(pid_t pid);
-	static void quitProcess(pid_t pid);
+	static void killProcess(ProcessId processId);
+	static void termProcess(ProcessId processId);
+	static void quitProcess(ProcessId processId);
 
 	static void launchUnixDaemon(string pidFilePathName);
 	static long getCurrentProcessIdentifier();
