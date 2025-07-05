@@ -41,12 +41,17 @@ using namespace std;
 class ProcessUtility
 {
 
+  public:
 	struct ProcessId
 	{
 #ifdef _WIN32
 		HANDLE processHandle = NULL;
+		void reset() { processHandle = NULL; }
+		bool isInitialized() { return processHandle != NULL; }
 #else
 		pid_t pid = -1;
+		void reset() { pid = -1; }
+		bool isInitialized() { return pid != -1; }
 #endif
 	};
 
