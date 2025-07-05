@@ -55,6 +55,7 @@ class ProcessUtility
 		bool isInitialized() { return pid != -1; }
 		string toString() { return std::format("{}", pid); }
 #endif
+		auto operator<=>(const ProcessId &) const = default;
 	};
 
   public:
