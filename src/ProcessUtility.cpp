@@ -31,8 +31,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#ifdef _WIN32
+#else
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 void ProcessUtility::forkAndExec(
 	string programPath,
