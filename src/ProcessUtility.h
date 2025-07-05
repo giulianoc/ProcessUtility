@@ -48,10 +48,12 @@ class ProcessUtility
 		HANDLE processHandle = NULL;
 		void reset() { processHandle = NULL; }
 		bool isInitialized() { return processHandle != NULL; }
+		string toString() { return format("{}", reinterpret_cast<uintptr_t>(processHandle)); }
 #else
 		pid_t pid = -1;
 		void reset() { pid = -1; }
 		bool isInitialized() { return pid != -1; }
+		string toString() { return format("{}", pid); }
 #endif
 	};
 
@@ -60,23 +62,34 @@ class ProcessUtility
 		string programPath,
 		// first string is the program name, than we have the params
 		vector<string> &argList, string redirectionPathName, bool redirectionStdOutput, bool redirectionStdError, ProcessId &processId,
-		int *piReturnedStatus
+		int &returnedStatus
 	);
 
+#ifdef _WIN32
+#else
 	template <typename Func> static int forkAndExec(Func func, int timeoutSeconds = 10, string referenceToLog = "");
+#endif
 
 	static int execute(string command);
 
 	static void killProcess(ProcessId processId);
+#ifdef _WIN32
+#else
 	static void termProcess(ProcessId processId);
 	static void quitProcess(ProcessId processId);
+#endif
 
+#ifdef _WIN32
+#else
 	static void launchUnixDaemon(string pidFilePathName);
+#endif
 	static long getCurrentProcessIdentifier();
 };
 
 // #endif
 
+#ifdef _WIN32
+#else
 template <typename Func> int ProcessUtility::forkAndExec(Func func, int timeoutSeconds, string referenceToLog)
 {
 	// Duplicate this process.
@@ -178,3 +191,4 @@ template <typename Func> int ProcessUtility::forkAndExec(Func func, int timeoutS
 		}
 	}
 }
+#endif

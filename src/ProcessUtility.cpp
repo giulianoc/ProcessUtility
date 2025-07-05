@@ -38,9 +38,79 @@ void ProcessUtility::forkAndExec(
 	string programPath,
 	// first string is the program name, than we have the params
 	vector<string> &argList, string redirectionPathName, bool redirectionStdOutput, bool redirectionStdError, ProcessId &processId,
-	int *piReturnedStatus
+	int &returnedStatus
 )
 {
+#ifdef _WIN32
+	HANDLE hFile = INVALID_HANDLE_VALUE;
+	HANDLE hThread = NULL;
+
+	try
+	{
+		bool redirectOnFile = redirectionPathName != "" && (redirectionStdOutput || redirectionStdError);
+		if (redirectOnFile)
+		{
+			// 1. Crea file log
+			SECURITY_ATTRIBUTES sa{sizeof(sa), NULL, TRUE}; // Handle ereditabile
+			hFile = CreateFileA(redirectionPathName.c_str(), GENERIC_WRITE, FILE_SHARE_READ, &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+
+			if (hFile == INVALID_HANDLE_VALUE)
+				throw runtime_error("Unable to open log file: " + logFilePath);
+		}
+
+		STARTUPINFOA si = {sizeof(si)};
+		if (redirectOnFile)
+		{
+			si.cb = sizeof(si);
+			si.dwFlags = STARTF_USESTDHANDLES;
+			si.hStdOutput = hFile;
+			si.hStdError = hFile;
+			si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+		}
+		PROCESS_INFORMATION pi;
+
+		string command;
+		{
+			command = programPath + " ";
+
+			for (int paramIndex = 0; paramIndex < argList.size(); paramIndex++)
+				command = argList[paramIndex] + " ";
+		}
+
+		if (!CreateProcessA(NULL, cmdCopy.data(), NULL, NULL, redirectOnFile ? TRUE /* ereditare gli handle */ : FALSE, 0, NULL, NULL, &si, &pi))
+			throw runtime_error("Failed to launch process: " + command);
+
+		// salva gli handle per chiuderli in seguito
+		processId.processHandle = pi.hProcess;
+		hThread = pi.hThread;
+
+		returnedStatus = -1;
+
+		// 4. Attendi la fine del processo
+		WaitForSingleObject(processId.processHandle, INFINITE);
+		DWORD exitCode = 0;
+		GetExitCodeProcess(processId.processHandle, &exitCode);
+
+		// 5. Cleanup
+		CloseHandle(hThread);
+		CloseHandle(processId.processHandle);
+		CloseHandle(hFile);
+
+		returnedStatus = static_cast<int>(exitCode);
+	}
+	catch (const exception &ex)
+	{
+		// Cleanup anche in caso di errore
+		if (hThread != NULL)
+			CloseHandle(hThread);
+		if (processId.processHandle != NULL)
+			CloseHandle(processId.processHandle);
+		if (hFile != INVALID_HANDLE_VALUE)
+			CloseHandle(hFile);
+
+		throw runtime_error(std::format("Exception: {}", ew.what()));
+	}
+#else
 	// Duplicate this process.
 	pid_t childPid = fork();
 	if (childPid == -1)
@@ -79,7 +149,7 @@ void ProcessUtility::forkAndExec(
 			if (waitPid == -1)
 			{
 				string errorMessage = string("waitpid failed");
-				*piReturnedStatus = -1;
+				returnedStatus = -1;
 
 				throw runtime_error(errorMessage);
 			}
@@ -96,20 +166,20 @@ void ProcessUtility::forkAndExec(
 				if (WIFEXITED(wstatus))
 				{
 					// Child ended normally
-					*piReturnedStatus = WEXITSTATUS(wstatus);
+					returnedStatus = WEXITSTATUS(wstatus);
 				}
 				else if (WIFSIGNALED(wstatus))
 				{
 					string errorMessage =
 						string("Child has exit abnormally because of an uncaught signal. Terminating signal: ") + to_string(WTERMSIG(wstatus));
-					*piReturnedStatus = WTERMSIG(wstatus);
+					returnedStatus = WTERMSIG(wstatus);
 
 					throw runtime_error(errorMessage);
 				}
 				else if (WIFSTOPPED(wstatus))
 				{
 					string errorMessage = string("Child has stopped. Stop signal: ") + to_string(WSTOPSIG(wstatus));
-					*piReturnedStatus = WSTOPSIG(wstatus);
+					returnedStatus = WSTOPSIG(wstatus);
 
 					throw runtime_error(errorMessage);
 				}
@@ -120,9 +190,7 @@ void ProcessUtility::forkAndExec(
 	{
 		vector<char *> commandVector;
 		for (int paramIndex = 0; paramIndex < argList.size(); paramIndex++)
-		{
 			commandVector.push_back(const_cast<char *>(argList[paramIndex].c_str()));
-		}
 		commandVector.push_back(NULL);
 
 		if (redirectionPathName != "" && (redirectionStdOutput || redirectionStdError))
@@ -159,6 +227,7 @@ void ProcessUtility::forkAndExec(
 
 		throw runtime_error(errorMessage);
 	}
+#endif
 }
 
 int ProcessUtility::execute(string command)
@@ -187,21 +256,26 @@ int ProcessUtility::execute(string command)
 
 void ProcessUtility::killProcess(ProcessId processId)
 {
-	if (processId.pid <= 0)
+	if (!processId.isInitialized())
 	{
-		string errorMessage = std::format("pid is wrong. pid: {}", processId.pid);
+		string errorMessage = std::format("processId is wrong. processId: {}", processId.toString());
 
 		throw runtime_error(errorMessage);
 	}
-
+#ifdef _WIN32
+	TerminateProcess(processId.processHandle, 1);
+#else
 	if (kill(processId.pid, SIGKILL) == -1)
 	{
 		string errorMessage = std::format("kill failed. errno: {}", errno);
 
 		throw runtime_error(errorMessage);
 	}
+#endif
 }
 
+#ifdef _WIN32
+#else
 void ProcessUtility::termProcess(ProcessId processId)
 {
 	if (processId.pid <= 0)
@@ -218,7 +292,10 @@ void ProcessUtility::termProcess(ProcessId processId)
 		throw runtime_error(errorMessage);
 	}
 }
+#endif
 
+#ifdef _WIN32
+#else
 void ProcessUtility::quitProcess(ProcessId processId)
 {
 	if (processId.pid <= 0)
@@ -235,7 +312,10 @@ void ProcessUtility::quitProcess(ProcessId processId)
 		throw runtime_error(errorMessage);
 	}
 }
+#endif
 
+#ifdef _WIN32
+#else
 void ProcessUtility::launchUnixDaemon(string pidFilePathName)
 {
 	/* Our process ID and Session ID */
@@ -304,6 +384,7 @@ void ProcessUtility::launchUnixDaemon(string pidFilePathName)
 		of << processIdentifier;
 	}
 }
+#endif
 
 long ProcessUtility::getCurrentProcessIdentifier()
 {
