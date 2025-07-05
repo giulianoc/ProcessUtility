@@ -48,12 +48,12 @@ class ProcessUtility
 		HANDLE processHandle = NULL;
 		void reset() { processHandle = NULL; }
 		bool isInitialized() { return processHandle != NULL; }
-		string toString() { return format("{}", reinterpret_cast<uintptr_t>(processHandle)); }
+		string toString() { return std::format("{}", reinterpret_cast<uintptr_t>(processHandle)); }
 #else
 		pid_t pid = -1;
 		void reset() { pid = -1; }
 		bool isInitialized() { return pid != -1; }
-		string toString() { return format("{}", pid); }
+		string toString() { return std::format("{}", pid); }
 #endif
 	};
 
