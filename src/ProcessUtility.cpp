@@ -80,7 +80,7 @@ void ProcessUtility::forkAndExec(
 				command = argList[paramIndex] + " ";
 		}
 
-		if (!CreateProcessA(NULL, cmdCopy.data(), NULL, NULL, redirectOnFile ? TRUE /* ereditare gli handle */ : FALSE, 0, NULL, NULL, &si, &pi))
+		if (!CreateProcessA(NULL, command.data(), NULL, NULL, redirectOnFile ? TRUE /* ereditare gli handle */ : FALSE, 0, NULL, NULL, &si, &pi))
 			throw runtime_error("Failed to launch process: " + command);
 
 		// salva gli handle per chiuderli in seguito
@@ -111,7 +111,7 @@ void ProcessUtility::forkAndExec(
 		if (hFile != INVALID_HANDLE_VALUE)
 			CloseHandle(hFile);
 
-		throw runtime_error(std::format("Exception: {}", ew.what()));
+		throw runtime_error(std::format("Exception: {}", ex.what()));
 	}
 #else
 	// Duplicate this process.
@@ -242,7 +242,7 @@ int ProcessUtility::execute(string command)
 		throw runtime_error("system failed");
 
 #ifdef WIN32
-	*returnedStatus = iLocalStatus;
+	returnedStatus = iLocalStatus;
 #else
 	if (!WIFEXITED(iLocalStatus))
 		throw runtime_error(std::format(
