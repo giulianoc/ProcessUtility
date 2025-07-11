@@ -77,10 +77,9 @@ void ProcessUtility::forkAndExec(
 			command = programPath + " ";
 
 			for (int paramIndex = 0; paramIndex < argList.size(); paramIndex++)
-				command = argList[paramIndex] + " ";
+				command += (argList[paramIndex] + " ");
 		}
 
-		SPDLOG_INFO("windows command: {}", command);
 		if (!CreateProcessA(NULL, command.data(), NULL, NULL, redirectOnFile ? TRUE /* ereditare gli handle */ : FALSE, 0, NULL, NULL, &si, &pi))
 			throw runtime_error("Failed to launch process: " + command);
 
