@@ -76,7 +76,7 @@ void ProcessUtility::forkAndExec(
 		{
 			command = programPath + " ";
 
-			for (int paramIndex = 0; paramIndex < argList.size(); paramIndex++)
+			for (int paramIndex = 1; paramIndex < argList.size(); paramIndex++)
 				command += (argList[paramIndex] + " ");
 		}
 
