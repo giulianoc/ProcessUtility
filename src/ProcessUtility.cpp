@@ -80,6 +80,7 @@ void ProcessUtility::forkAndExec(
 				command = argList[paramIndex] + " ";
 		}
 
+		SPDLOG_INFO("windows command: {}", command);
 		if (!CreateProcessA(NULL, command.data(), NULL, NULL, redirectOnFile ? TRUE /* ereditare gli handle */ : FALSE, 0, NULL, NULL, &si, &pi))
 			throw runtime_error("Failed to launch process: " + command);
 
