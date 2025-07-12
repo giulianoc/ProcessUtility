@@ -80,8 +80,11 @@ void ProcessUtility::forkAndExec(
 				command += (argList[paramIndex] + " ");
 		}
 
-		SPDLOG_INFO("windows command: {}", command);
-		if (!CreateProcessA(NULL, command.data(), NULL, NULL, redirectOnFile ? TRUE /* ereditare gli handle */ : FALSE, 0, NULL, NULL, &si, &pi))
+		// SPDLOG_INFO("windows command: {}", command);
+		DWORD creationFlags = CREATE_NO_WINDOW;
+		if (!CreateProcessA(
+				NULL, command.data(), NULL, NULL, redirectOnFile ? TRUE /* ereditare gli handle */ : FALSE, creationFlags, NULL, NULL, &si, &pi
+			))
 			throw runtime_error("Failed to launch process: " + command);
 
 		// salva gli handle per chiuderli in seguito
