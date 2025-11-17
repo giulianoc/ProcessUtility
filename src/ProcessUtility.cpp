@@ -409,6 +409,9 @@ void ProcessUtility::forkAndExecByCallback(
 			if (!buffer.empty() && lineCallback)
 				lineCallback(buffer);
 		}
+		// send empty line to signal end of output
+		if (lineCallback)
+			lineCallback("");
 
 		close(pipefd[0]);
 
