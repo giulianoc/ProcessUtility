@@ -38,9 +38,9 @@
 #endif
 
 void ProcessUtility::forkAndExec(
-	string programPath,
+	const string& programPath,
 	// first string is the program name, than we have the params
-	vector<string> &argList, string redirectionPathName, bool redirectionStdOutput, bool redirectionStdError, ProcessId &processId,
+	vector<string> &argList, const string& redirectionPathName, bool redirectionStdOutput, bool redirectionStdError, ProcessId &processId,
 	int &returnedStatus
 )
 {
@@ -196,11 +196,12 @@ void ProcessUtility::forkAndExec(
 	else
 	{
 		vector<char *> commandVector;
+		commandVector.reserve(argList.size() + 1);
 		for (int paramIndex = 0; paramIndex < argList.size(); paramIndex++)
 			commandVector.push_back(const_cast<char *>(argList[paramIndex].c_str()));
 		commandVector.push_back(NULL);
 
-		if (redirectionPathName != "" && (redirectionStdOutput || redirectionStdError))
+		if (!redirectionPathName.empty() && (redirectionStdOutput || redirectionStdError))
 		{
 			int fd = open(redirectionPathName.c_str(), O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 			if (fd == -1)
@@ -237,7 +238,258 @@ void ProcessUtility::forkAndExec(
 #endif
 }
 
-int ProcessUtility::execute(string command)
+void ProcessUtility::forkAndExecByCallback(
+	const string& programPath,
+	// first string is the program name, than we have the params
+	const vector<string> &argList, const LineCallback& lineCallback, bool redirectionStdOutput, bool redirectionStdError, ProcessId &processId,
+	int &returnedStatus
+)
+{
+#ifdef _WIN32
+    HANDLE stdoutRead = NULL, stdoutWrite = NULL;
+    HANDLE stderrRead = NULL, stderrWrite = NULL;
+    HANDLE childProcess = NULL;
+    HANDLE childThread = NULL;
+
+    try
+    {
+        SECURITY_ATTRIBUTES sa{ sizeof(sa), NULL, TRUE }; // handle ereditabili
+
+        if (redirectionStdOutput) {
+            if (!CreatePipe(&stdoutRead, &stdoutWrite, &sa, 0))
+                throw std::runtime_error("CreatePipe stdout failed");
+        }
+        if (redirectionStdError) {
+            if (!CreatePipe(&stderrRead, &stderrWrite, &sa, 0))
+                throw std::runtime_error("CreatePipe stderr failed");
+        }
+
+        STARTUPINFOA si{};
+        si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESTDHANDLES;
+
+        si.hStdOutput = redirectionStdOutput ? stdoutWrite : GetStdHandle(STD_OUTPUT_HANDLE);
+        si.hStdError  = redirectionStdError ? stderrWrite : GetStdHandle(STD_ERROR_HANDLE);
+        si.hStdInput  = GetStdHandle(STD_INPUT_HANDLE);
+
+        PROCESS_INFORMATION pi{};
+
+        // Costruisci il comando
+        std::string command = programPath;
+        for (int i = 1; i < argList.size(); i++)
+            command += " " + argList[i];
+
+        if (!CreateProcessA(
+                NULL,
+                command.data(),
+                NULL,
+                NULL,
+                TRUE,                     // eredita gli handle
+                CREATE_NO_WINDOW,
+                NULL,
+                NULL,
+                &si,
+                &pi))
+        {
+            throw std::runtime_error("CreateProcessA failed: " + command);
+        }
+
+        childProcess = pi.hProcess;
+        childThread  = pi.hThread;
+
+        // Molto importante: chiudere *nel padre* gli endpoint IN SCRITTURA!
+        if (stdoutWrite) CloseHandle(stdoutWrite);
+        if (stderrWrite) CloseHandle(stderrWrite);
+
+        // Thread di lettura stdout
+        std::thread stdoutThread([&] {
+            if (!redirectionStdOutput) return;
+            readPipeLines(stdoutRead, lineCallback, /*isStdErr*/ false);
+        });
+
+        // Thread di lettura stderr
+        std::thread stderrThread([&] {
+            if (!redirectionStdError) return;
+            readPipeLines(stderrRead, lineCallback, /*isStdErr*/ true);
+        });
+
+        stdoutThread.join();
+        stderrThread.join();
+
+        WaitForSingleObject(childProcess, INFINITE);
+        DWORD exitCode = 0;
+        GetExitCodeProcess(childProcess, &exitCode);
+        returnedStatus = (int)exitCode;
+
+        if (stdoutRead) CloseHandle(stdoutRead);
+        if (stderrRead) CloseHandle(stderrRead);
+        CloseHandle(childThread);
+        CloseHandle(childProcess);
+    }
+    catch (const std::exception& ex)
+    {
+        if (stdoutRead) CloseHandle(stdoutRead);
+        if (stderrRead) CloseHandle(stderrRead);
+        if (stdoutWrite) CloseHandle(stdoutWrite);
+        if (stderrWrite) CloseHandle(stderrWrite);
+        if (childThread) CloseHandle(childThread);
+        if (childProcess) CloseHandle(childProcess);
+
+        throw std::runtime_error(std::format("Exception: {}", ex.what()));
+    }
+#else
+	// a pipe is a connection between two processes, such that the standard output from one process becomes the standard input of the other process
+	int pipefd[2];
+	if (pipe(pipefd) == -1)
+		throw runtime_error(std::format("pipe failed. errno: {}", errno));
+
+	// Duplicate this process.
+	pid_t childPid = fork();
+	if (childPid == -1)
+	{
+		close(pipefd[0]);
+		close(pipefd[1]);
+
+		throw runtime_error(std::format("Fork failed. errno: {}", errno));
+	}
+
+	if (childPid != 0)
+	{
+		// parent process
+		// Status information about the child reported by wait is more than just the exit status of the child, it also includes
+		// - normal/abnormal termination
+		//		WIFEXITED(status): child exited normally
+		//		WEXITSTATUS(status): return code when child exits
+		// - termination cause
+		//		WIFSIGNALED(status): child exited because a signal was not caught
+		//		WTERMSIG(status): gives the number of the terminating signal
+		// - exit status
+		//		WIFSTOPPED(status): child is stopped
+		//		WSTOPSIG(status): gives the number of the stop signal
+		// if we want to prints information about a signal
+		//	void psignal(unsigned sig, const char *s);
+
+		// close write end of the pipe
+		close(pipefd[1]);
+
+		processId.pid = childPid;
+
+		// reader loop
+		{
+	        char buf[4096];
+			string buffer;
+	        while (true)
+	        {
+	            ssize_t bytesRead = ::read(pipefd[0], buf, sizeof(buf));
+	            if (bytesRead > 0)
+	            {
+	            	buffer.append(buf, bytesRead);
+
+	            	// extract all complete lines
+	            	size_t pos;
+	            	while ((pos = buffer.find('\n')) != std::string::npos)
+	            	{
+	            		string line = buffer.substr(0, pos);
+	            		buffer.erase(0, pos + 1);
+
+	            		if (lineCallback)
+	            			lineCallback(line);
+	            	}
+	            }
+	        	else if (bytesRead == 0) // reading end-of-file
+	                break;
+	        	else // -1 is returned and the global variable errno is set to indicate the error
+	            {
+	                if (errno == EINTR) // A read from a slow device was interrupted before any data arrived by the delivery of a signal
+	                	continue;
+	                break;
+	            }
+	        }
+			// leftover partial line
+			if (!buffer.empty() && lineCallback)
+				lineCallback(buffer);
+		}
+
+		close(pipefd[0]);
+
+		// se siamo qui il figlio dovrebbe essere terminato, abbiamo aspettato che terminasse nel loop precedente
+		// Teniamo il loop successivo per sicurezza
+		bool childTerminated = false;
+		while (!childTerminated)
+		{
+			int wstatus;
+			pid_t waitPid = waitpid(childPid, &wstatus, 0);
+			if (waitPid == -1)
+			{
+				returnedStatus = -1;
+
+				throw runtime_error("waitpid failed");
+			}
+			if (waitPid == 0)
+			{
+				// child still running, non dovrebbe accadere
+			}
+			else // if (waitPid == childPid)
+			{
+				// child ended
+
+				childTerminated = true;
+
+				if (WIFEXITED(wstatus))
+				{
+					// Child ended normally
+					returnedStatus = WEXITSTATUS(wstatus);
+				}
+				else if (WIFSIGNALED(wstatus))
+				{
+					returnedStatus = WTERMSIG(wstatus);
+
+					throw runtime_error(std::format("Child has exit abnormally because of an uncaught signal. Terminating signal: {}", WTERMSIG(wstatus)));
+				}
+				else if (WIFSTOPPED(wstatus))
+				{
+					returnedStatus = WSTOPSIG(wstatus);
+
+					throw runtime_error(std::format("Child has stopped. Stop signal: {}", WSTOPSIG(wstatus)));
+				}
+			}
+		}
+	}
+	else
+	{
+		// processo figlio
+
+		vector<char *> commandVector;
+		commandVector.reserve(argList.size() + 1);
+		for (const auto & arg : argList)
+			commandVector.push_back(const_cast<char *>(arg.c_str()));
+		commandVector.push_back(nullptr);
+
+		if (redirectionStdOutput || redirectionStdError)
+		{
+			// redirect stdout and stderr to pipefd[1]
+			// dopo la chiamata dup2, STDOUT_FILENO/STDERR_FILENO punta a pipefd[1]
+			// Tutto ciò che il processo figlio scriverà su stdout/stderr finirà nella pipe creata prima della fork
+			if (redirectionStdOutput)
+				dup2(pipefd[1], STDOUT_FILENO);
+			if (redirectionStdError)
+				dup2(pipefd[1], STDERR_FILENO);
+			// al processo figlio non serve la pipe
+			close(pipefd[0]);
+			close(pipefd[1]);
+		}
+
+		// child process: execute the command
+		execv(programPath.c_str(), &commandVector[0]);
+		// execv(programPath.c_str(),  argListParam);
+
+		// The execv function returns only if an error occurs.
+		throw runtime_error(std::format("An error occurred in execv. errno: {}", errno));
+	}
+#endif
+}
+
+int ProcessUtility::execute(const string& command)
 {
 	int returnedStatus;
 	int iLocalStatus;
@@ -264,20 +516,12 @@ int ProcessUtility::execute(string command)
 void ProcessUtility::killProcess(ProcessId processId)
 {
 	if (!processId.isInitialized())
-	{
-		string errorMessage = std::format("processId is wrong. processId: {}", processId.toString());
-
-		throw runtime_error(errorMessage);
-	}
+		throw runtime_error(std::format("processId is wrong. processId: {}", processId.toString()));
 #ifdef _WIN32
 	TerminateProcess(processId.processHandle, 1);
 #else
 	if (kill(processId.pid, SIGKILL) == -1)
-	{
-		string errorMessage = std::format("kill failed. errno: {}", errno);
-
-		throw runtime_error(errorMessage);
-	}
+		throw runtime_error(std::format("kill failed. errno: {}", errno));
 #endif
 }
 
@@ -286,18 +530,10 @@ void ProcessUtility::killProcess(ProcessId processId)
 void ProcessUtility::termProcess(ProcessId processId)
 {
 	if (processId.pid <= 0)
-	{
-		string errorMessage = std::format("pid is wrong. pid: {}", processId.pid);
-
-		throw runtime_error(errorMessage);
-	}
+		throw runtime_error(std::format("pid is wrong. pid: {}", processId.pid));
 
 	if (kill(processId.pid, SIGTERM) == -1)
-	{
-		string errorMessage = std::format("kill failed. errno: {}", errno);
-
-		throw runtime_error(errorMessage);
-	}
+		throw runtime_error(std::format("kill failed. errno: {}", errno));
 }
 #endif
 
@@ -306,18 +542,10 @@ void ProcessUtility::termProcess(ProcessId processId)
 void ProcessUtility::quitProcess(ProcessId processId)
 {
 	if (processId.pid <= 0)
-	{
-		string errorMessage = std::format("pid is wrong. pid: {}", processId.pid);
-
-		throw runtime_error(errorMessage);
-	}
+		throw runtime_error(std::format("pid is wrong. pid: {}", processId.pid));
 
 	if (kill(processId.pid, SIGQUIT) == -1)
-	{
-		string errorMessage = std::format("quit failed. errno: {}", errno);
-
-		throw runtime_error(errorMessage);
-	}
+		throw runtime_error(std::format("quit failed. errno: {}", errno));
 }
 #endif
 
@@ -331,16 +559,12 @@ void ProcessUtility::launchUnixDaemon(string pidFilePathName)
 	/* Fork off the parent process */
 	pid = fork();
 	if (pid < 0)
-	{
 		exit(EXIT_FAILURE);
-	}
 
 	/* If we got a good PID, then
 		we can exit the parent process. */
 	if (pid > 0)
-	{
 		exit(EXIT_SUCCESS);
-	}
 
 	/*
 		In order to write to any files (including logs) created
@@ -357,22 +581,14 @@ void ProcessUtility::launchUnixDaemon(string pidFilePathName)
 	*/
 	sid = setsid();
 	if (sid < 0)
-	{
-		/* Log the failure */
-
 		exit(EXIT_FAILURE);
-	}
 
 	/*
 		The current working directory should be changed to some place
 		that is guaranteed to always be there.
 	*/
 	if ((chdir("/")) < 0)
-	{
-		/* Log the failure */
-
 		exit(EXIT_FAILURE);
-	}
 
 	/* Close out the standard file descriptors */
 	/*
@@ -385,7 +601,7 @@ void ProcessUtility::launchUnixDaemon(string pidFilePathName)
 	// close (STDERR_FILENO);
 
 	{
-		long processIdentifier = ProcessUtility::getCurrentProcessIdentifier();
+		const long processIdentifier = ProcessUtility::getCurrentProcessIdentifier();
 
 		ofstream of(pidFilePathName.c_str(), ofstream::trunc);
 		of << processIdentifier;

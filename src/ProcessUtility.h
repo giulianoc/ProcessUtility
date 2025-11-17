@@ -52,17 +52,25 @@ class ProcessUtility
 #else
 		pid_t pid = -1;
 		void reset() { pid = -1; }
-		bool isInitialized() { return pid != -1; }
+		[[nodiscard]] bool isInitialized() const { return pid != -1; }
 		string toString() { return std::format("{}", pid); }
 #endif
 		auto operator<=>(const ProcessId &) const = default;
 	};
 
-  public:
 	static void forkAndExec(
-		string programPath,
+		const string &programPath,
 		// first string is the program name, than we have the params
-		vector<string> &argList, string redirectionPathName, bool redirectionStdOutput, bool redirectionStdError, ProcessId &processId,
+		vector<string> &argList, const string &redirectionPathName, bool redirectionStdOutput, bool redirectionStdError, ProcessId &processId,
+		int &returnedStatus
+	);
+
+    using LineCallback = function<void(const string_view&)>;
+
+	static void forkAndExecByCallback(
+		const string &programPath,
+		// first string is the program name, than we have the params
+		const vector<string> &argList, const LineCallback& lineCallback, bool redirectionStdOutput, bool redirectionStdError, ProcessId &processId,
 		int &returnedStatus
 	);
 
@@ -71,7 +79,7 @@ class ProcessUtility
 	template <typename Func> static int forkAndExec(Func func, int timeoutSeconds = 10, string referenceToLog = "");
 #endif
 
-	static int execute(string command);
+	static int execute(const string &command);
 
 	static void killProcess(ProcessId processId);
 #ifdef _WIN32
