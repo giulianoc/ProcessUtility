@@ -374,9 +374,6 @@ void ProcessUtility::forkAndExecByCallback(
 
 		processId.pid = childPid;
 
-		SPDLOG_INFO("forkAndExecByCallback parent: reader loop"
-			);
-
 		// reader loop
 		{
 	        char buf[4096];
@@ -485,9 +482,6 @@ void ProcessUtility::forkAndExecByCallback(
 			close(pipefd[1]);
 		}
 
-		SPDLOG_INFO("forkAndExecByCallback child: execv"
-			", programPath: {}", programPath
-			);
 		// child process: execute the command
 		execv(programPath.c_str(), &commandVector[0]);
 		// execv(programPath.c_str(),  argListParam);
