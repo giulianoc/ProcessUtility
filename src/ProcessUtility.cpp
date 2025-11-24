@@ -344,7 +344,7 @@ void ProcessUtility::forkAndExecByCallback(
 		throw runtime_error(std::format("pipe failed. errno: {}", errno));
 
 	// Duplicate this process.
-	pid_t childPid = fork();
+	const pid_t childPid = fork();
 	if (childPid == -1)
 	{
 		close(pipefd[0]);
@@ -373,6 +373,9 @@ void ProcessUtility::forkAndExecByCallback(
 		close(pipefd[1]);
 
 		processId.pid = childPid;
+
+		SPDLOG_INFO("forkAndExecByCallback parent: reader loop"
+			);
 
 		// reader loop
 		{
@@ -482,6 +485,9 @@ void ProcessUtility::forkAndExecByCallback(
 			close(pipefd[1]);
 		}
 
+		SPDLOG_INFO("forkAndExecByCallback child: execv"
+			", programPath: {}", programPath
+			);
 		// child process: execute the command
 		execv(programPath.c_str(), &commandVector[0]);
 		// execv(programPath.c_str(),  argListParam);
