@@ -23,7 +23,6 @@
 
 #pragma once
 
-#include "spdlog/spdlog.h"
 #include <format>
 #include <string>
 #include <vector>
@@ -35,6 +34,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
+#include "spdlog/spdlog.h"
 
 using namespace std;
 
