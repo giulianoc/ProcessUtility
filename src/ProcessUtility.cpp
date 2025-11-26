@@ -227,8 +227,6 @@ void ProcessUtility::forkAndExec(
 		}
 
 		// child process: execute the command
-		for (char* arg: commandVector)
-			SPDLOG_INFO("AAAAAAAAAA arg: {}", arg ? arg : "NULL");
 		execv(programPath.c_str(), &commandVector[0]);
 		// execv(programPath.c_str(),  argListParam);
 
