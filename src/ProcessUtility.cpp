@@ -478,8 +478,8 @@ void ProcessUtility::forkAndExecByCallback(
 			if (redirectionStdError)
 				dup2(pipefd[1], STDERR_FILENO);
 			// al processo figlio non serve la pipe
-			// close(pipefd[0]);
-			// close(pipefd[1]);
+			close(pipefd[0]);
+			close(pipefd[1]);
 		}
 
 		// child process: execute the command
