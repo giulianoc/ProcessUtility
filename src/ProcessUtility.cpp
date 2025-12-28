@@ -348,7 +348,7 @@ void ProcessUtility::forkAndExecByCallback(
 
         childProcess = pi.hProcess;
         childThread  = pi.hThread;
-        processId    = static_cast<ProcessId>(pi.dwProcessId);
+    	processId.processHandle = childProcess;
 
         // Nel padre: chiudi gli estremi di scrittura (il figlio li usa)
         if (stdoutWrite) { CloseHandle(stdoutWrite); stdoutWrite = NULL; }
