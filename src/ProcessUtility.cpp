@@ -238,6 +238,53 @@ void ProcessUtility::forkAndExec(
 #endif
 }
 
+#ifdef _WIN32
+
+// Quota un token secondo regole di Windows per CreateProcess,
+// compatibile con la CRT (escape di backslash prima di un doppio apice).
+static std::string quoteArgWindows(const std::string& arg) {
+	bool needQuotes = arg.empty() || arg.find_first_of(" \t\"") != std::string::npos;
+	if (!needQuotes) return arg;
+
+	std::string out;
+	out.push_back('"');
+	size_t bsCount = 0;
+	for (char c : arg) {
+		if (c == '\\') {
+			++bsCount;
+		} else if (c == '"') {
+			// Escape: raddoppia i backslash e poi escape quote
+			out.append(bsCount * 2, '\\');
+			bsCount = 0;
+			out.append("\\\"");
+		} else {
+			if (bsCount) {
+				out.append(bsCount, '\\');
+				bsCount = 0;
+			}
+			out.push_back(c);
+		}
+	}
+	// Backslash finali prima della chiusura di quote vanno raddoppiati
+	if (bsCount) out.append(bsCount * 2, '\\');
+	out.push_back('"');
+	return out;
+}
+
+// Costruisce la command line: primo token = programma (quotato),
+// poi tutti gli argomenti quotati (saltando argList[0] se è il nome programma).
+static std::string buildWindowsCommandLine(const std::string& programPath,
+										   const std::vector<std::string>& argList) {
+	std::string cmd = quoteArgWindows(programPath);
+	// Se argList[0] è il "nome programma", saltiamolo per non duplicarlo
+	for (size_t i = 1; i < argList.size(); ++i) {
+		cmd.push_back(' ');
+		cmd += quoteArgWindows(argList[i]);
+	}
+	return cmd;
+}
+#endif
+
 void ProcessUtility::forkAndExecByCallback(
 	const string& programPath,
 	// first string is the program name, than we have the params
@@ -246,22 +293,27 @@ void ProcessUtility::forkAndExecByCallback(
 )
 {
 #ifdef _WIN32
+
     HANDLE stdoutRead = NULL, stdoutWrite = NULL;
     HANDLE stderrRead = NULL, stderrWrite = NULL;
     HANDLE childProcess = NULL;
     HANDLE childThread = NULL;
 
-    try
-    {
-        SECURITY_ATTRIBUTES sa{ sizeof(sa), NULL, TRUE }; // handle ereditabili
+    try {
+        SECURITY_ATTRIBUTES sa{};
+        sa.nLength = sizeof(sa);
+        sa.bInheritHandle = TRUE; // pipe con handle ereditabili (poi rimuoviamo l'ereditarietà dove serve)
 
         if (redirectionStdOutput) {
             if (!CreatePipe(&stdoutRead, &stdoutWrite, &sa, 0))
                 throw std::runtime_error("CreatePipe stdout failed");
+            // Il figlio NON deve ereditare l'estremo di lettura
+            SetHandleInformation(stdoutRead, HANDLE_FLAG_INHERIT, 0);
         }
         if (redirectionStdError) {
             if (!CreatePipe(&stderrRead, &stderrWrite, &sa, 0))
                 throw std::runtime_error("CreatePipe stderr failed");
+            SetHandleInformation(stderrRead, HANDLE_FLAG_INHERIT, 0);
         }
 
         STARTUPINFOA si{};
@@ -274,68 +326,135 @@ void ProcessUtility::forkAndExecByCallback(
 
         PROCESS_INFORMATION pi{};
 
-        // Costruisci il comando
-        std::string command = programPath;
-        for (int i = 1; i < argList.size(); i++)
-            command += " " + argList[i];
+        // Command line correttamente quotata e NUL-terminata
+        std::string cmd = buildWindowsCommandLine(programPath, argList);
+        std::vector<char> cmdBuf(cmd.begin(), cmd.end());
+        cmdBuf.push_back('\0'); // LPSTR deve essere mutabile e NUL-terminato
 
         if (!CreateProcessA(
-                NULL,
-                command.data(),
-                NULL,
-                NULL,
-                TRUE,                     // eredita gli handle
-                CREATE_NO_WINDOW,
-                NULL,
-                NULL,
-                &si,
-                &pi))
+                /*lpApplicationName*/ nullptr,
+                /*lpCommandLine*/    cmdBuf.data(), // primo token = exe quotato
+                /*lpProcessAttributes*/ nullptr,
+                /*lpThreadAttributes*/  nullptr,
+                /*bInheritHandles*/     TRUE,
+                /*dwCreationFlags*/     CREATE_NO_WINDOW,
+                /*lpEnvironment*/       nullptr,
+                /*lpCurrentDirectory*/  nullptr,
+                /*lpStartupInfo*/       &si,
+                /*lpProcessInformation*/&pi))
         {
-            throw std::runtime_error("CreateProcessA failed: " + command);
+            throw std::runtime_error("CreateProcessA failed: " + cmd);
         }
 
         childProcess = pi.hProcess;
         childThread  = pi.hThread;
+        processId    = static_cast<ProcessId>(pi.dwProcessId);
 
-        // Molto importante: chiudere *nel padre* gli endpoint IN SCRITTURA!
-        if (stdoutWrite) CloseHandle(stdoutWrite);
-        if (stderrWrite) CloseHandle(stderrWrite);
+        // Nel padre: chiudi gli estremi di scrittura (il figlio li usa)
+        if (stdoutWrite) { CloseHandle(stdoutWrite); stdoutWrite = NULL; }
+        if (stderrWrite) { CloseHandle(stderrWrite); stderrWrite = NULL; }
 
         // Thread di lettura stdout
         std::thread stdoutThread([&] {
             if (!redirectionStdOutput) return;
-            readPipeLines(stdoutRead, lineCallback, /*isStdErr*/ false);
+
+            std::string buffer;
+            buffer.reserve(4096);
+            char chunk[2048];
+            DWORD nRead = 0;
+
+            while (ReadFile(stdoutRead, chunk, sizeof(chunk), &nRead, nullptr) && nRead > 0) {
+                buffer.append(chunk, chunk + nRead);
+                // Emissione per righe: gestisci CRLF
+                size_t start = 0;
+                while (true) {
+                    size_t pos = buffer.find('\n', start);
+                    if (pos == std::string::npos) break;
+                    size_t end = (pos > 0 && buffer[pos - 1] == '\r') ? (pos - 1) : pos;
+                    std::string_view line(buffer.data() + start, end - start);
+			    	if (lineCallback)
+				        lineCallback(line);
+                    start = pos + 1;
+                }
+                if (start > 0) buffer.erase(0, start);
+            }
+
+            // Flush dell’ultima porzione (senza newline)
+            if (!buffer.empty() && lineCallback) {
+                lineCallback(std::string_view(buffer));
+                buffer.clear();
+            }
         });
 
         // Thread di lettura stderr
         std::thread stderrThread([&] {
             if (!redirectionStdError) return;
-            readPipeLines(stderrRead, lineCallback, /*isStdErr*/ true);
+
+            std::string buffer;
+            buffer.reserve(4096);
+            char chunk[2048];
+            DWORD nRead = 0;
+
+            while (ReadFile(stderrRead, chunk, sizeof(chunk), &nRead, nullptr) && nRead > 0) {
+                buffer.append(chunk, chunk + nRead);
+                size_t start = 0;
+                while (true) {
+                    size_t pos = buffer.find('\n', start);
+                    if (pos == std::string::npos) break;
+                    size_t end = (pos > 0 && buffer[pos - 1] == '\r') ? (pos - 1) : pos;
+                    std::string_view line(buffer.data() + start, end - start);
+                    // Prefissa per distinguere stderr con un unico callback
+                    // std::string prefixed;
+                    // prefixed.reserve(line.size() + 9);
+                    // prefixed += "[stderr] ";
+                    // prefixed.append(line.data(), line.size());
+			    	if (lineCallback)
+	                    lineCallback(line); // std::string_view(prefixed));
+                    start = pos + 1;
+                }
+                if (start > 0) buffer.erase(0, start);
+            }
+
+            if (!buffer.empty() && lineCallback) {
+                // std::string prefixed;
+                // prefixed.reserve(buffer.size() + 9);
+                // prefixed += "[stderr] ";
+                // prefixed += buffer;
+                lineCallback(string_view(buffer)); // std::string_view(prefixed));
+                buffer.clear();
+            }
         });
 
+        // Attendi i reader
         stdoutThread.join();
         stderrThread.join();
 
+        // Attendi il processo figlio e ottieni l'exit code
         WaitForSingleObject(childProcess, INFINITE);
         DWORD exitCode = 0;
-        GetExitCodeProcess(childProcess, &exitCode);
-        returnedStatus = (int)exitCode;
+        if (!GetExitCodeProcess(childProcess, &exitCode)) {
+            exitCode = static_cast<DWORD>(-1);
+        }
+        returnedStatus = static_cast<int>(exitCode);
 
-        if (stdoutRead) CloseHandle(stdoutRead);
-        if (stderrRead) CloseHandle(stderrRead);
-        CloseHandle(childThread);
-        CloseHandle(childProcess);
+    	// send empty line to signal end of output
+    	if (lineCallback)
+    		lineCallback("");
+
+    	// Chiudi gli estremi di lettura
+        if (stdoutRead) { CloseHandle(stdoutRead); stdoutRead = NULL; }
+        if (stderrRead) { CloseHandle(stderrRead); stderrRead = NULL; }
+        if (childThread) { CloseHandle(childThread); childThread = NULL; }
+        if (childProcess) { CloseHandle(childProcess); childProcess = NULL; }
     }
-    catch (const std::exception& ex)
-    {
+    catch (const std::exception& ex) {
         if (stdoutRead) CloseHandle(stdoutRead);
         if (stderrRead) CloseHandle(stderrRead);
         if (stdoutWrite) CloseHandle(stdoutWrite);
         if (stderrWrite) CloseHandle(stderrWrite);
         if (childThread) CloseHandle(childThread);
         if (childProcess) CloseHandle(childProcess);
-
-        throw std::runtime_error(std::format("Exception: {}", ex.what()));
+        throw std::runtime_error(std::string("Exception: ") + ex.what());
     }
 #else
 	// a pipe is a connection between two processes, such that the standard output from one process becomes the standard input of the other process
