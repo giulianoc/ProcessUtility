@@ -38,9 +38,9 @@
 #endif
 
 void ProcessUtility::forkAndExec(
-	const string& programPath,
+	const std::string& programPath,
 	// first string is the program name, than we have the params
-	vector<string> &argList, const string& redirectionPathName, bool redirectionStdOutput, bool redirectionStdError, ProcessId &processId,
+	std::vector<std::string> &argList, const std::string& redirectionPathName, bool redirectionStdOutput, bool redirectionStdError, ProcessId &processId,
 	int &returnedStatus
 )
 {
@@ -119,13 +119,14 @@ void ProcessUtility::forkAndExec(
 	}
 #else
 	// Duplicate this process.
-	pid_t childPid = fork();
+	const pid_t childPid = fork();
 	if (childPid == -1)
 	{
 		// fork failed
-		string errorMessage = string("Fork failed. errno: ") + to_string(errno);
+		const std::string errorMessage = std::format("Fork failed. errno: {}", errno);
+		SPDLOG_ERROR(errorMessage);
 
-		throw runtime_error(errorMessage);
+		throw std::runtime_error(errorMessage);
 	}
 
 	if (childPid != 0)
@@ -155,10 +156,10 @@ void ProcessUtility::forkAndExec(
 			pid_t waitPid = waitpid(childPid, &wstatus, 0);
 			if (waitPid == -1)
 			{
-				string errorMessage = string("waitpid failed");
+				std::string errorMessage = "waitpid failed";
 				returnedStatus = -1;
 
-				throw runtime_error(errorMessage);
+				throw std::runtime_error(errorMessage);
 			}
 			else if (waitPid == 0)
 			{
@@ -177,25 +178,25 @@ void ProcessUtility::forkAndExec(
 				}
 				else if (WIFSIGNALED(wstatus))
 				{
-					string errorMessage =
-						string("Child has exit abnormally because of an uncaught signal. Terminating signal: ") + to_string(WTERMSIG(wstatus));
+					std::string errorMessage =
+						std::format("Child has exit abnormally because of an uncaught signal. Terminating signal: {}", WTERMSIG(wstatus));
 					returnedStatus = WTERMSIG(wstatus);
 
-					throw runtime_error(errorMessage);
+					throw std::runtime_error(errorMessage);
 				}
 				else if (WIFSTOPPED(wstatus))
 				{
-					string errorMessage = string("Child has stopped. Stop signal: ") + to_string(WSTOPSIG(wstatus));
+					std::string errorMessage = std::format("Child has stopped. Stop signal: {}", WSTOPSIG(wstatus));
 					returnedStatus = WSTOPSIG(wstatus);
 
-					throw runtime_error(errorMessage);
+					throw std::runtime_error(errorMessage);
 				}
 			}
 		}
 	}
 	else
 	{
-		vector<char *> commandVector;
+		std::vector<char *> commandVector;
 		commandVector.reserve(argList.size() + 1);
 		for (int paramIndex = 0; paramIndex < argList.size(); paramIndex++)
 			commandVector.push_back(const_cast<char *>(argList[paramIndex].c_str()));
@@ -206,9 +207,9 @@ void ProcessUtility::forkAndExec(
 			int fd = open(redirectionPathName.c_str(), O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 			if (fd == -1)
 			{
-				string errorMessage = string("Redirection file Open failed: ") + redirectionPathName;
+				std::string errorMessage = std::format("Redirection file Open failed: {}", redirectionPathName);
 
-				throw runtime_error(errorMessage);
+				throw std::runtime_error(errorMessage);
 			}
 
 			// redirect out, copy the file descriptor fd into standard output/error
@@ -231,9 +232,9 @@ void ProcessUtility::forkAndExec(
 		// execv(programPath.c_str(),  argListParam);
 
 		// The execv  function returns only if an error occurs.
-		string errorMessage = string("An error occurred in execv. errno: ") + to_string(errno);
+		std::string errorMessage = std::format("An error occurred in execv. errno: {}", errno);
 
-		throw runtime_error(errorMessage);
+		throw std::runtime_error(errorMessage);
 	}
 #endif
 }
@@ -286,9 +287,9 @@ static std::string buildWindowsCommandLine(const std::string& programPath,
 #endif
 
 void ProcessUtility::forkAndExecByCallback(
-	const string& programPath,
+	const std::string& programPath,
 	// first string is the program name, than we have the params
-	const vector<string> &argList, const LineCallback& lineCallback, bool redirectionStdOutput, bool redirectionStdError, ProcessId &processId,
+	const std::vector<std::string> &argList, const LineCallback& lineCallback, bool redirectionStdOutput, bool redirectionStdError, ProcessId &processId,
 	int &returnedStatus
 )
 {
@@ -460,7 +461,7 @@ void ProcessUtility::forkAndExecByCallback(
 	// a pipe is a connection between two processes, such that the standard output from one process becomes the standard input of the other process
 	int pipefd[2];
 	if (pipe(pipefd) == -1)
-		throw runtime_error(std::format("pipe failed. errno: {}", errno));
+		throw std::runtime_error(std::format("pipe failed. errno: {}", errno));
 
 	// Duplicate this process.
 	const pid_t childPid = fork();
@@ -469,7 +470,7 @@ void ProcessUtility::forkAndExecByCallback(
 		close(pipefd[0]);
 		close(pipefd[1]);
 
-		throw runtime_error(std::format("Fork failed. errno: {}", errno));
+		throw std::runtime_error(std::format("Fork failed. errno: {}", errno));
 	}
 
 	if (childPid != 0)
@@ -496,7 +497,7 @@ void ProcessUtility::forkAndExecByCallback(
 		// reader loop
 		{
 	        char buf[4096];
-			string buffer;
+			std::string buffer;
 	        while (true)
 	        {
 	            ssize_t bytesRead = ::read(pipefd[0], buf, sizeof(buf));
@@ -508,7 +509,7 @@ void ProcessUtility::forkAndExecByCallback(
 	            	size_t pos;
 	            	while ((pos = buffer.find('\n')) != std::string::npos)
 	            	{
-	            		string line = buffer.substr(0, pos);
+	            		std::string line = buffer.substr(0, pos);
 	            		buffer.erase(0, pos + 1);
 
 	            		if (lineCallback)
@@ -545,7 +546,7 @@ void ProcessUtility::forkAndExecByCallback(
 			{
 				returnedStatus = -1;
 
-				throw runtime_error("waitpid failed");
+				throw std::runtime_error("waitpid failed");
 			}
 			if (waitPid == 0)
 			{
@@ -566,13 +567,13 @@ void ProcessUtility::forkAndExecByCallback(
 				{
 					returnedStatus = WTERMSIG(wstatus);
 
-					throw runtime_error(std::format("Child has exit abnormally because of an uncaught signal. Terminating signal: {}", WTERMSIG(wstatus)));
+					throw std::runtime_error(std::format("Child has exit abnormally because of an uncaught signal. Terminating signal: {}", WTERMSIG(wstatus)));
 				}
 				else if (WIFSTOPPED(wstatus))
 				{
 					returnedStatus = WSTOPSIG(wstatus);
 
-					throw runtime_error(std::format("Child has stopped. Stop signal: {}", WSTOPSIG(wstatus)));
+					throw std::runtime_error(std::format("Child has stopped. Stop signal: {}", WSTOPSIG(wstatus)));
 				}
 			}
 		}
@@ -581,7 +582,7 @@ void ProcessUtility::forkAndExecByCallback(
 	{
 		// processo figlio
 
-		vector<char *> commandVector;
+		std::vector<char *> commandVector;
 		commandVector.reserve(argList.size() + 1);
 		for (const auto & arg : argList)
 			commandVector.push_back(const_cast<char *>(arg.c_str()));
@@ -606,24 +607,24 @@ void ProcessUtility::forkAndExecByCallback(
 		// execv(programPath.c_str(),  argListParam);
 
 		// The execv function returns only if an error occurs.
-		throw runtime_error(std::format("An error occurred in execv. errno: {}", errno));
+		throw std::runtime_error(std::format("An error occurred in execv. errno: {}", errno));
 	}
 #endif
 }
 
-int ProcessUtility::execute(const string& command)
+int ProcessUtility::execute(const std::string& command)
 {
 	int returnedStatus;
 	int iLocalStatus;
 
 	if ((iLocalStatus = system(command.c_str())) == -1)
-		throw runtime_error("system failed");
+		throw std::runtime_error("system failed");
 
 #ifdef WIN32
 	returnedStatus = iLocalStatus;
 #else
 	if (!WIFEXITED(iLocalStatus))
-		throw runtime_error(std::format(
+		throw std::runtime_error(std::format(
 			"system failed"
 			"iLocalStatus: {}",
 			iLocalStatus
@@ -638,12 +639,12 @@ int ProcessUtility::execute(const string& command)
 void ProcessUtility::killProcess(ProcessId processId)
 {
 	if (!processId.isInitialized())
-		throw runtime_error(std::format("processId is wrong. processId: {}", processId.toString()));
+		throw std::runtime_error(std::format("processId is wrong. processId: {}", processId.toString()));
 #ifdef _WIN32
 	TerminateProcess(processId.processHandle, 1);
 #else
 	if (kill(processId.pid, SIGKILL) == -1)
-		throw runtime_error(std::format("kill failed. errno: {}", errno));
+		throw std::runtime_error(std::format("kill failed. errno: {}", errno));
 #endif
 }
 
@@ -652,10 +653,10 @@ void ProcessUtility::killProcess(ProcessId processId)
 void ProcessUtility::termProcess(ProcessId processId)
 {
 	if (processId.pid <= 0)
-		throw runtime_error(std::format("pid is wrong. pid: {}", processId.pid));
+		throw std::runtime_error(std::format("pid is wrong. pid: {}", processId.pid));
 
 	if (kill(processId.pid, SIGTERM) == -1)
-		throw runtime_error(std::format("kill failed. errno: {}", errno));
+		throw std::runtime_error(std::format("kill failed. errno: {}", errno));
 }
 #endif
 
@@ -664,16 +665,16 @@ void ProcessUtility::termProcess(ProcessId processId)
 void ProcessUtility::quitProcess(ProcessId processId)
 {
 	if (processId.pid <= 0)
-		throw runtime_error(std::format("pid is wrong. pid: {}", processId.pid));
+		throw std::runtime_error(std::format("pid is wrong. pid: {}", processId.pid));
 
 	if (kill(processId.pid, SIGQUIT) == -1)
-		throw runtime_error(std::format("quit failed. errno: {}", errno));
+		throw std::runtime_error(std::format("quit failed. errno: {}", errno));
 }
 #endif
 
 #ifdef _WIN32
 #else
-void ProcessUtility::launchUnixDaemon(string pidFilePathName)
+void ProcessUtility::launchUnixDaemon(std::string pidFilePathName)
 {
 	/* Our process ID and Session ID */
 	pid_t pid, sid;
@@ -725,7 +726,7 @@ void ProcessUtility::launchUnixDaemon(string pidFilePathName)
 	{
 		const long processIdentifier = ProcessUtility::getCurrentProcessIdentifier();
 
-		ofstream of(pidFilePathName.c_str(), ofstream::trunc);
+		std::ofstream of(pidFilePathName.c_str(), std::ofstream::trunc);
 		of << processIdentifier;
 	}
 }

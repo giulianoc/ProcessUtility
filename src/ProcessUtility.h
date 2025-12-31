@@ -36,8 +36,6 @@
 #endif
 #include "spdlog/spdlog.h"
 
-using namespace std;
-
 class ProcessUtility
 {
 
@@ -53,33 +51,33 @@ class ProcessUtility
 		pid_t pid = -1;
 		void reset() { pid = -1; }
 		[[nodiscard]] bool isInitialized() const { return pid != -1; }
-		string toString() { return std::format("{}", pid); }
+		std::string toString() { return std::format("{}", pid); }
 #endif
 		auto operator<=>(const ProcessId &) const = default;
 	};
 
 	static void forkAndExec(
-		const string &programPath,
+		const std::string &programPath,
 		// first string is the program name, than we have the params
-		vector<string> &argList, const string &redirectionPathName, bool redirectionStdOutput, bool redirectionStdError, ProcessId &processId,
+		std::vector<std::string> &argList, const std::string &redirectionPathName, bool redirectionStdOutput, bool redirectionStdError, ProcessId &processId,
 		int &returnedStatus
 	);
 
-    using LineCallback = function<void(const string_view&)>;
+    using LineCallback = std::function<void(const std::string_view&)>;
 
 	static void forkAndExecByCallback(
-		const string &programPath,
+		const std::string &programPath,
 		// first string is the program name, than we have the params
-		const vector<string> &argList, const LineCallback& lineCallback, bool redirectionStdOutput, bool redirectionStdError, ProcessId &processId,
+		const std::vector<std::string> &argList, const LineCallback& lineCallback, bool redirectionStdOutput, bool redirectionStdError, ProcessId &processId,
 		int &returnedStatus
 	);
 
 #ifdef _WIN32
 #else
-	template <typename Func> static int forkAndExec(Func func, int timeoutSeconds = 10, string referenceToLog = "");
+	template <typename Func> static int forkAndExec(Func func, int timeoutSeconds = 10, std::string referenceToLog = "");
 #endif
 
-	static int execute(const string &command);
+	static int execute(const std::string &command);
 
 	static void killProcess(ProcessId processId);
 #ifdef _WIN32
@@ -90,7 +88,7 @@ class ProcessUtility
 
 #ifdef _WIN32
 #else
-	static void launchUnixDaemon(string pidFilePathName);
+	static void launchUnixDaemon(std::string pidFilePathName);
 #endif
 	static long getCurrentProcessIdentifier();
 };
@@ -99,13 +97,13 @@ class ProcessUtility
 
 #ifdef _WIN32
 #else
-template <typename Func> int ProcessUtility::forkAndExec(Func func, int timeoutSeconds, string referenceToLog)
+template <typename Func> int ProcessUtility::forkAndExec(Func func, int timeoutSeconds, std::string referenceToLog)
 {
 	// Duplicate this process.
 	pid_t childPid = fork();
 	if (childPid == -1)
 	{
-		string errorMessage = std::format(
+		std::string errorMessage = std::format(
 			"forkAndExec. Fork failed"
 			"{}"
 			", timeoutSeconds: {}"
@@ -114,7 +112,7 @@ template <typename Func> int ProcessUtility::forkAndExec(Func func, int timeoutS
 		);
 		SPDLOG_ERROR(errorMessage);
 
-		throw runtime_error(errorMessage);
+		throw std::runtime_error(errorMessage);
 	}
 
 	if (childPid != 0)
@@ -148,7 +146,7 @@ template <typename Func> int ProcessUtility::forkAndExec(Func func, int timeoutS
 						", timeoutSeconds: {}",
 						referenceToLog, timeoutSeconds
 					);
-				this_thread::sleep_for(chrono::seconds(1));
+				std::this_thread::sleep_for(std::chrono::seconds(1));
 				waited++;
 			}
 			else
