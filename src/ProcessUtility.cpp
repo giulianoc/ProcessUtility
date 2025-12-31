@@ -58,7 +58,7 @@ void ProcessUtility::forkAndExec(
 			hFile = CreateFileA(redirectionPathName.c_str(), GENERIC_WRITE, FILE_SHARE_READ, &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 
 			if (hFile == INVALID_HANDLE_VALUE)
-				throw runtime_error("Unable to open log file: " + redirectionPathName);
+				throw std::runtime_error("Unable to open log file: " + redirectionPathName);
 		}
 
 		STARTUPINFOA si = {sizeof(si)};
@@ -72,7 +72,7 @@ void ProcessUtility::forkAndExec(
 		}
 		PROCESS_INFORMATION pi;
 
-		string command;
+		std::string command;
 		{
 			command = programPath + " ";
 
@@ -85,7 +85,7 @@ void ProcessUtility::forkAndExec(
 		if (!CreateProcessA(
 				NULL, command.data(), NULL, NULL, redirectOnFile ? TRUE /* ereditare gli handle */ : FALSE, creationFlags, NULL, NULL, &si, &pi
 			))
-			throw runtime_error("Failed to launch process: " + command);
+			throw std::runtime_error("Failed to launch process: " + command);
 
 		// salva gli handle per chiuderli in seguito
 		processId.processHandle = pi.hProcess;
