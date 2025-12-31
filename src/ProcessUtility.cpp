@@ -105,7 +105,7 @@ void ProcessUtility::forkAndExec(
 
 		returnedStatus = static_cast<int>(exitCode);
 	}
-	catch (const exception &ex)
+	catch (const std::exception &ex)
 	{
 		// Cleanup anche in caso di errore
 		if (hThread != NULL)
@@ -115,7 +115,7 @@ void ProcessUtility::forkAndExec(
 		if (hFile != INVALID_HANDLE_VALUE)
 			CloseHandle(hFile);
 
-		throw runtime_error(std::format("Exception: {}", ex.what()));
+		throw std::runtime_error(std::format("Exception: {}", ex.what()));
 	}
 #else
 	// Duplicate this process.
