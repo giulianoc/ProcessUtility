@@ -29,8 +29,17 @@ SET (HEADERS
 )
 
 include_directories("${SPDLOG_INCLUDE_DIR}")
+include_directories("${THREADLOGGER_INCLUDE_DIR}")
 
 add_library (ProcessUtility SHARED ${SOURCES} ${HEADERS})
+
+if(APPLE)
+	link_directories(${THREADLOGGER_LIBRARY_DIR})
+endif(APPLE)
+
+if(APPLE)
+	target_link_libraries (ProcessUtility ThreadLogger)
+endif ()
 
 install (TARGETS ProcessUtility DESTINATION lib)
 install (FILES ${HEADERS} DESTINATION include)

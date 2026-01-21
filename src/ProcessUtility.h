@@ -34,7 +34,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
-#include "spdlog/spdlog.h"
+#include "ThreadLogger.h"
 
 class ProcessUtility
 {
@@ -110,7 +110,7 @@ template <typename Func> int ProcessUtility::forkAndExec(Func func, int timeoutS
 			", errno: {}",
 			referenceToLog, timeoutSeconds, errno
 		);
-		SPDLOG_ERROR(errorMessage);
+		LOG_ERROR(errorMessage);
 
 		throw std::runtime_error(errorMessage);
 	}
@@ -140,7 +140,7 @@ template <typename Func> int ProcessUtility::forkAndExec(Func func, int timeoutS
 			if (result == 0)
 			{
 				if (waited % 60 == 0)
-					SPDLOG_DEBUG(
+					LOG_DEBUG(
 						"forkAndExec. Still waiting the child process"
 						"{}"
 						", timeoutSeconds: {}",
@@ -160,7 +160,7 @@ template <typename Func> int ProcessUtility::forkAndExec(Func func, int timeoutS
 
 			exitStatus = -3; // timeout
 
-			SPDLOG_ERROR(
+			LOG_ERROR(
 				"forkAndExec. Child process timeout, killed"
 				"{}"
 				", timeoutSeconds: {}"
@@ -174,7 +174,7 @@ template <typename Func> int ProcessUtility::forkAndExec(Func func, int timeoutS
 
 		exitStatus = WIFEXITED(exitStatus) ? WEXITSTATUS(exitStatus) : -4;
 
-		SPDLOG_DEBUG(
+		LOG_DEBUG(
 			"forkAndExec. Child process terminated"
 			"{}"
 			", timeoutSeconds: {}"

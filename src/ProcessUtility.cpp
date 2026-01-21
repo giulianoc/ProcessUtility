@@ -80,7 +80,7 @@ void ProcessUtility::forkAndExec(
 				command += (argList[paramIndex] + " ");
 		}
 
-		// SPDLOG_INFO("windows command: {}", command);
+		// LOG_INFO("windows command: {}", command);
 		DWORD creationFlags = CREATE_NO_WINDOW;
 		if (!CreateProcessA(
 				NULL, command.data(), NULL, NULL, redirectOnFile ? TRUE /* ereditare gli handle */ : FALSE, creationFlags, NULL, NULL, &si, &pi
@@ -124,7 +124,7 @@ void ProcessUtility::forkAndExec(
 	{
 		// fork failed
 		const std::string errorMessage = std::format("Fork failed. errno: {}", errno);
-		SPDLOG_ERROR(errorMessage);
+		LOG_ERROR(errorMessage);
 
 		throw std::runtime_error(errorMessage);
 	}
