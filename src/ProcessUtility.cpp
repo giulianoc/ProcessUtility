@@ -458,10 +458,28 @@ void ProcessUtility::forkAndExecByCallback(
         throw std::runtime_error(std::string("Exception: ") + ex.what());
     }
 #else
-	// a pipe is a connection between two processes, such that the standard output from one process becomes the standard input of the other process
+	// a pipe is a connection between two processes, such that the standard output from one process
+	// becomes the standard input of the other process
 	int pipefd[2];
+	// il flag FD_CLOEXEC indica che eventuali subprocess NON ereditano la pipe
+	// It sets the close-on-exec flag for the file descriptor, which causes the file descriptor to be automatically (and atomically)
+	// closed when any of the exec-family functions succeed
+#ifdef __linux__
+	if (pipe2(pipefd, O_CLOEXEC) == -1)
+#else
 	if (pipe(pipefd) == -1)
-		throw std::runtime_error(std::format("pipe failed. errno: {}", errno));
+#endif
+	{
+		const std::string errorMessage = std::format("pipe failed. errno: {}", errno);
+		LOG_ERROR(errorMessage);
+		throw std::runtime_error(errorMessage);
+	}
+
+#ifdef __linux__
+#else
+	fcntl(pipefd[0], F_SETFD, FD_CLOEXEC);
+	fcntl(pipefd[1], F_SETFD, FD_CLOEXEC);
+#endif
 
 	// Duplicate this process.
 	const pid_t childPid = fork();
@@ -470,7 +488,9 @@ void ProcessUtility::forkAndExecByCallback(
 		close(pipefd[0]);
 		close(pipefd[1]);
 
-		throw std::runtime_error(std::format("Fork failed. errno: {}", errno));
+		const std::string errorMessage = std::format("Fork failed. errno: {}", errno);
+		LOG_ERROR(errorMessage);
+		throw std::runtime_error(errorMessage);
 	}
 
 	if (childPid != 0)
@@ -500,8 +520,25 @@ void ProcessUtility::forkAndExecByCallback(
 			std::string buffer;
 	        while (true)
 	        {
+	        	// read() termina solo quando:
+	        	//	- riceve EOF → tutte le write-end della pipe sono chiuse
+	        	//	- oppure riceve dati
+				// Se per QUALSIASI motivo:
+				//  - il processo figlio termina
+				//  - ma qualche file descriptor verso pipefd[1] rimane aperto
+	        	// allora:
+	        	// - read() non riceve mai EOF
+	        	// - rimane bloccato
+	        	// - non si esce mai dal loop
+	        	// Questo puo accadere se ad es:
+	        	// - il processo figlio crea processi figli che ereditano la pipe e non la chiudono
+	        	// - il processo figlio crea thread che ereditano la pipe e non la chiudono
+	        	// - il processo figlio non chiude la pipe dopo execv
+	        	// Per questo motivo sopra ho settato il flag FD_CLOEXEC sulla pipe, in modo che eventuali subprocess non ereditino la pipe
+	        	// e non possano rimanere con file descriptor aperti verso pipefd[1]
+
 	            ssize_t bytesRead = ::read(pipefd[0], buf, sizeof(buf));
-	            if (bytesRead > 0)
+				if (bytesRead > 0)
 	            {
 	            	buffer.append(buf, bytesRead);
 
@@ -516,9 +553,9 @@ void ProcessUtility::forkAndExecByCallback(
 	            			lineCallback(line);
 	            	}
 	            }
-	        	else if (bytesRead == 0) // reading end-of-file
+				else if (bytesRead == 0) // reading end-of-file
 	                break;
-	        	else // -1 is returned and the global variable errno is set to indicate the error
+				else // -1 is returned and the global variable errno is set to indicate the error
 	            {
 	                if (errno == EINTR) // A read from a slow device was interrupted before any data arrived by the delivery of a signal
 	                	continue;
@@ -535,47 +572,37 @@ void ProcessUtility::forkAndExecByCallback(
 
 		close(pipefd[0]);
 
-		// se siamo qui il figlio dovrebbe essere terminato, abbiamo aspettato che terminasse nel loop precedente
-		// Teniamo il loop successivo per sicurezza
-		bool childTerminated = false;
-		while (!childTerminated)
+		// se siamo qui abbiamo ricevuto EOF nella pipe, questo significa che il processo figlio ha chiuso la write-end della pipe,
+		// quindi è terminato (cmq aspettiamo la terminazione con waitpid per sicurezza e per ottenere il codice di uscita)
+		int wstatus;
+		if (waitpid(childPid, &wstatus, 0) == -1)
 		{
-			int wstatus;
-			pid_t waitPid = waitpid(childPid, &wstatus, 0);
-			if (waitPid == -1)
-			{
-				returnedStatus = -1;
+			returnedStatus = -1;
 
-				throw std::runtime_error("waitpid failed");
-			}
-			if (waitPid == 0)
-			{
-				// child still running, non dovrebbe accadere
-			}
-			else // if (waitPid == childPid)
-			{
-				// child ended
+			const std::string errorMessage = std::format("waitpid failed. errno: {}", errno);
+			LOG_ERROR(errorMessage);
+			throw std::runtime_error(errorMessage);
+		}
+		if (WIFEXITED(wstatus))
+		{
+			// Child ended normally
+			returnedStatus = WEXITSTATUS(wstatus);
+		}
+		else if (WIFSIGNALED(wstatus))
+		{
+			returnedStatus = WTERMSIG(wstatus);
 
-				childTerminated = true;
+			const std::string errorMessage = std::format("Child has exit abnormally because of an uncaught signal. Terminating signal: {}", WTERMSIG(wstatus));
+			LOG_ERROR(errorMessage);
+			throw std::runtime_error(errorMessage);
+		}
+		else if (WIFSTOPPED(wstatus))
+		{
+			returnedStatus = WSTOPSIG(wstatus);
 
-				if (WIFEXITED(wstatus))
-				{
-					// Child ended normally
-					returnedStatus = WEXITSTATUS(wstatus);
-				}
-				else if (WIFSIGNALED(wstatus))
-				{
-					returnedStatus = WTERMSIG(wstatus);
-
-					throw std::runtime_error(std::format("Child has exit abnormally because of an uncaught signal. Terminating signal: {}", WTERMSIG(wstatus)));
-				}
-				else if (WIFSTOPPED(wstatus))
-				{
-					returnedStatus = WSTOPSIG(wstatus);
-
-					throw std::runtime_error(std::format("Child has stopped. Stop signal: {}", WSTOPSIG(wstatus)));
-				}
-			}
+			const std::string errorMessage = std::format("Child has stopped. Stop signal: {}", WSTOPSIG(wstatus));
+			LOG_ERROR(errorMessage);
+			throw std::runtime_error(errorMessage);
 		}
 	}
 	else
@@ -607,7 +634,14 @@ void ProcessUtility::forkAndExecByCallback(
 		// execv(programPath.c_str(),  argListParam);
 
 		// The execv function returns only if an error occurs.
-		throw std::runtime_error(std::format("An error occurred in execv. errno: {}", errno));
+		// Dopo fork in un processo multi-thread, NON è safe usare logger, Nel child dovresti fare SOLO funzioni async-signal-safe
+		// const std::string errorMessage = std::format("execv failed. errno: {}", errno);
+		// LOG_ERROR(errorMessage);
+		// perror scrive su stderr, poichè abbiamo rediretto, perror() finisce nella pipe, viene letto nel parent, passa nel lineCallback
+		perror("execv failed");
+		// ritroveremmo 255 ritornato da WEXITSTATUS in caso di execv fallito, così da distinguere un execv fallito da un processo
+		// che ritorna 255 come exit code
+		exit(255);
 	}
 #endif
 }
